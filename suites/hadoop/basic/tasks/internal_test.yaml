@@ -1,5 +1,4 @@
 tasks:
-- chef:
 - ssh_keys:
 - ceph:
 - kclient: [client.0]
