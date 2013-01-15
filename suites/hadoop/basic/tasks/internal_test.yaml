@@ -1,7 +1,6 @@
 tasks:
 - ssh_keys:
 - ceph:
-- kclient: [client.0]
 - hadoop:
 - workunit:
     branch: wip-buck
