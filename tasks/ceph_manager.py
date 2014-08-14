@@ -77,6 +77,7 @@ class Thrasher:
         self.clean_wait = self.config.get('clean_wait', 0)
         self.minin = self.config.get("min_in", 3)
         self.ceph_objectstore_tool = self.config.get('ceph_objectstore_tool', True)
+        self.chance_move_pg = self.config.get('chance_move_pg', 1.0)
 
         num_osds = self.in_osds + self.out_osds
         self.max_pgs = self.config.get("max_pgs_per_pool_osd", 1200) * num_osds
@@ -125,9 +126,6 @@ class Thrasher:
             prefix = "sudo ceph_objectstore_tool --data-path {fpath} --journal-path {jpath} ".format(fpath=FSPATH, jpath=JPATH)
             cmd = (prefix + "--op list-pgs").format(id=osd)
             proc = remote.run(args=cmd, wait=True, check_status=True, stdout=StringIO())
-            if proc.exitstatus != 0:
-                self.log("Failed to get pg list for osd.{osd}".format(osd=osd))
-                return
             pgs = proc.stdout.getvalue().split('\n')[:-1]
             if len(pgs) == 0:
                 self.log("No PGs found for osd.{osd}".format(osd=osd))
@@ -143,6 +141,16 @@ class Thrasher:
                 cmd = (prefix + "--op remove --pgid {pg}").format(id=osd, pg=pg)
                 proc = remote.run(args=cmd)
                 if proc.exitstatus == 0:
+                    # If there are at least 2 dead osds we might move the pg
+                    if len(self.dead_osds) > 1 and random.random() < chance_move_pg:
+                        checkosd =  random.choice(self.dead_osds[:-1])
+                        # If pg isn't already on this osd, then we will move it there
+                        cmd = (prefix + "--op list-pgs").format(id=checkosd)
+                        proc = remote.run(args=cmd, wait=True, check_status=True, stdout=StringIO())
+                        pgs = proc.stdout.getvalue().split('\n')[:-1]
+                        if pg not in pgs:
+                            self.log("Moving pg {pg} from osd.{fosd} to osd.{tosd}".format(pg=pg, fosd=osd, tosd=checkosd))
+                            osd = checkosd
                     # import
                     cmd = (prefix + "--op import --file {file}").format(id=osd, file=fpath)
                     remote.run(args=cmd)
