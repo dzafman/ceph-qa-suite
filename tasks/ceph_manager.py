@@ -11,6 +11,7 @@ import os
 from teuthology import misc as teuthology
 from tasks.scrub import Scrubber
 from util.rados import cmd_erasure_code_profile
+from teuthology.orchestra.remote import Remote
 
 def make_admin_daemon_dir(ctx, remote):
     """
@@ -131,7 +132,7 @@ class Thrasher:
                 self.log("No PGs found for osd.{osd}".format(osd=osd))
                 return
             pg = random.choice(pgs)
-            fpath = os.path.join(os.path.join(teuthology.get_testdir(self.ceph_manager.ctx), "data"), "exp.{pg}.{id}".format(pg=pg,id=osd))
+            fpath = os.path.join(os.path.join(teuthology.get_testdir(self.ceph_manager.ctx), "data"), "exp.{pg}.{id}".format(pg=pg, id=osd))
             # export
             success = False
             cmd = (prefix + "--op export --pgid {pg} --file {file}").format(id=osd, pg=pg, file=fpath)
@@ -141,23 +142,34 @@ class Thrasher:
                 cmd = (prefix + "--op remove --pgid {pg}").format(id=osd, pg=pg)
                 proc = remote.run(args=cmd)
                 if proc.exitstatus == 0:
+                    dest_remote = src_remote = remote
                     # If there are at least 2 dead osds we might move the pg
-                    if len(self.dead_osds) > 1 and random.random() < chance_move_pg:
-                        checkosd =  random.choice(self.dead_osds[:-1])
+                    if len(self.dead_osds) > 1 and random.random() < self.chance_move_pg:
+                        checkosd = random.choice(self.dead_osds[:-1])
+                        (check_remote,) = self.ceph_manager.ctx.cluster.only('osd.{o}'.format(o=checkosd)).remotes.iterkeys()
                         # If pg isn't already on this osd, then we will move it there
                         cmd = (prefix + "--op list-pgs").format(id=checkosd)
-                        proc = remote.run(args=cmd, wait=True, check_status=True, stdout=StringIO())
+                        proc = check_remote.run(args=cmd, wait=True, check_status=True, stdout=StringIO())
                         pgs = proc.stdout.getvalue().split('\n')[:-1]
                         if pg not in pgs:
+                            dest_remote = check_remote
                             self.log("Moving pg {pg} from osd.{fosd} to osd.{tosd}".format(pg=pg, fosd=osd, tosd=checkosd))
+                            if src_remote != dest_remote:
+                                # Copy export file to the other machine
+                                self.log("Transfer export file from {srem} to {trem}".format(srem=src_remote, trem=dest_remote))
+                                tmpexport = Remote.get_file(src_remote, fpath)
+                                Remote.put_file(dest_remote, tmpexport, fpath)
+                                os.remove(tmpexport)
                             osd = checkosd
                     # import
                     cmd = (prefix + "--op import --file {file}").format(id=osd, file=fpath)
-                    remote.run(args=cmd)
+                    dest_remote.run(args=cmd)
                     if proc.exitstatus == 0:
                         success = True
             cmd = "rm -f {file}".format(file=fpath)
-            remote.run(args=cmd)
+            src_remote.run(args=cmd)
+            if dest_remote != src_remote:
+                dest_remote.run(args=cmd)
             if not success:
                 raise Exception("ceph_objectstore_tool: failure with status {ret}".format(ret=proc.exitstatus))
 
