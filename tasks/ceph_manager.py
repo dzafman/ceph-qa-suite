@@ -78,7 +78,7 @@ class Thrasher:
         self.clean_wait = self.config.get('clean_wait', 0)
         self.minin = self.config.get("min_in", 3)
         self.ceph_objectstore_tool = self.config.get('ceph_objectstore_tool', True)
-        self.chance_move_pg = self.config.get('chance_move_pg', 1.0)
+        self.chance_move_pg = self.config.get('chance_move_pg', 0.0)
 
         num_osds = self.in_osds + self.out_osds
         self.max_pgs = self.config.get("max_pgs_per_pool_osd", 1200) * num_osds
